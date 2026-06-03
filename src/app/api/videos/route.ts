@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { z } from 'zod'
+import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 
@@ -13,7 +14,40 @@ const createSchema = z.object({
   duration: z.number().int().optional(),
 })
 
-// Public — anyone can fetch published videos
+function signedUrl(publicId: string, resourceType = 'video', expiresIn = 3600) {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME!
+  const apiKey = process.env.CLOUDINARY_API_KEY!
+  const apiSecret = process.env.CLOUDINARY_API_SECRET!
+  const expireAt = Math.floor(Date.now() / 1000) + expiresIn
+
+  const toSign = `exp=${expireAt}&public_id=${publicId}`
+  const signature = crypto.createHash('sha256').update(toSign + apiSecret).digest('hex')
+
+  return `https://res.cloudinary.com/${cloudName}/${resourceType}/upload/s--${signature.slice(0, 8)}--/e_${expireAt}/${publicId}`
+}
+
+function signedThumbnail(publicId: string, expiresIn = 3600) {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME!
+  const apiKey = process.env.CLOUDINARY_API_KEY!
+  const apiSecret = process.env.CLOUDINARY_API_SECRET!
+  const expireAt = Math.floor(Date.now() / 1000) + expiresIn
+
+  const toSign = `exp=${expireAt}&public_id=${publicId}`
+  const signature = crypto.createHash('sha256').update(toSign + apiSecret).digest('hex')
+
+  return `https://res.cloudinary.com/${cloudName}/video/upload/s--${signature.slice(0, 8)}--/e_${expireAt}/so_0/${publicId}.jpg`
+}
+
+function withSignedUrls(video: any) {
+  const publicId = video.cloudinaryId ?? video.url?.split('/upload/').pop()?.replace(/\.\w+$/, '') ?? ''
+  return {
+    ...video,
+    url: publicId ? signedUrl(publicId) : video.url,
+    thumbnail: publicId ? signedThumbnail(publicId) : video.thumbnail,
+  }
+}
+
+// Public — anyone can fetch published videos (with signed URLs)
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const page = Math.max(1, Number(searchParams.get('page') ?? 1))
@@ -25,12 +59,11 @@ export async function GET(req: Request) {
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
-      select: { id: true, title: true, description: true, url: true, thumbnail: true, duration: true, views: true, createdAt: true },
     }),
     prisma.video.count({ where: { published: true } }),
   ])
 
-  return NextResponse.json({ videos, total, page, pages: Math.ceil(total / limit) })
+  return NextResponse.json({ videos: videos.map(withSignedUrls), total, page, pages: Math.ceil(total / limit) })
 }
 
 // Admin only — upload new video record
