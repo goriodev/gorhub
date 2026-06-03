@@ -22,6 +22,7 @@ model User {
   orders    Order[]
   projects  Project[]
   tasks     Task[]
+  videos    Video[]
   accounts  Account[]
   sessions  Session[]
 }
@@ -177,4 +178,23 @@ enum Priority {
   MEDIUM
   HIGH
   URGENT
+}
+
+// ── Video Streaming ──────────────────────────────────────
+
+model Video {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?  @db.Text
+  cloudinaryId  String   @unique
+  url           String
+  thumbnail     String?
+  duration      Int?
+  published     Boolean  @default(true)
+  views         Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
