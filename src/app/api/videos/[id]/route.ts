@@ -1,16 +1,24 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import crypto from 'crypto'
+import { v2 as cloudinary } from 'cloudinary'
 import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 
-function getSignedVideoUrl(publicId: string, expiresIn = 3600) {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME!
-  const apiSecret = process.env.CLOUDINARY_API_SECRET!
-  const expireAt = Math.floor(Date.now() / 1000) + expiresIn
-  const toSign = `exp=${expireAt}&public_id=${publicId}`
-  const sig = crypto.createHash('sha256').update(toSign + apiSecret).digest('hex')
-  return `https://res.cloudinary.com/${cloudName}/video/upload/s--${sig.slice(0, 8)}--/e_${expireAt}/${publicId}`
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
+})
+
+function getSignedVideoUrl(cloudinaryId: string) {
+  return cloudinary.url(cloudinaryId, {
+    resource_type: 'video',
+    type: 'authenticated',
+    sign_url: true,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    secure: true,
+  })
 }
 
 // Increment view count + return signed URL — public
@@ -20,8 +28,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   await prisma.video.update({ where: { id: params.id }, data: { views: { increment: 1 } } })
 
-  const signedVideoUrl = getSignedVideoUrl(video.cloudinaryId)
-  return NextResponse.json({ ...video, url: signedVideoUrl })
+  return NextResponse.json({ ...video, url: getSignedVideoUrl(video.cloudinaryId) })
 }
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {

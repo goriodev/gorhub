@@ -27,7 +27,8 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.5.5",
     "@hello-pangea/dnd": "^17.0.0",
-    "date-fns": "^4.1.0"
+    "date-fns": "^4.1.0",
+    "cloudinary": "^2.5.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

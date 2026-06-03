@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { z } from 'zod'
-import crypto from 'crypto'
+import { v2 as cloudinary } from 'cloudinary'
 import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
+})
 
 const createSchema = z.object({
   title: z.string().min(1).max(200),
@@ -14,40 +21,40 @@ const createSchema = z.object({
   duration: z.number().int().optional(),
 })
 
-function signedUrl(publicId: string, resourceType = 'video', expiresIn = 3600) {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME!
-  const apiKey = process.env.CLOUDINARY_API_KEY!
-  const apiSecret = process.env.CLOUDINARY_API_SECRET!
-  const expireAt = Math.floor(Date.now() / 1000) + expiresIn
+function getSignedUrls(cloudinaryId: string) {
+  const expiresAt = Math.floor(Date.now() / 1000) + 3600
 
-  const toSign = `exp=${expireAt}&public_id=${publicId}`
-  const signature = crypto.createHash('sha256').update(toSign + apiSecret).digest('hex')
+  const url = cloudinary.url(cloudinaryId, {
+    resource_type: 'video',
+    type: 'authenticated',
+    sign_url: true,
+    expires_at: expiresAt,
+    secure: true,
+  })
 
-  return `https://res.cloudinary.com/${cloudName}/${resourceType}/upload/s--${signature.slice(0, 8)}--/e_${expireAt}/${publicId}`
-}
+  const thumbnail = cloudinary.url(cloudinaryId, {
+    resource_type: 'video',
+    type: 'authenticated',
+    sign_url: true,
+    expires_at: expiresAt,
+    format: 'jpg',
+    start_offset: '0',
+    secure: true,
+  })
 
-function signedThumbnail(publicId: string, expiresIn = 3600) {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME!
-  const apiKey = process.env.CLOUDINARY_API_KEY!
-  const apiSecret = process.env.CLOUDINARY_API_SECRET!
-  const expireAt = Math.floor(Date.now() / 1000) + expiresIn
-
-  const toSign = `exp=${expireAt}&public_id=${publicId}`
-  const signature = crypto.createHash('sha256').update(toSign + apiSecret).digest('hex')
-
-  return `https://res.cloudinary.com/${cloudName}/video/upload/s--${signature.slice(0, 8)}--/e_${expireAt}/so_0/${publicId}.jpg`
+  return { url, thumbnail }
 }
 
 function withSignedUrls(video: any) {
-  const publicId = video.cloudinaryId ?? video.url?.split('/upload/').pop()?.replace(/\.\w+$/, '') ?? ''
-  return {
-    ...video,
-    url: publicId ? signedUrl(publicId) : video.url,
-    thumbnail: publicId ? signedThumbnail(publicId) : video.thumbnail,
+  try {
+    const { url, thumbnail } = getSignedUrls(video.cloudinaryId)
+    return { ...video, url, thumbnail }
+  } catch {
+    return video
   }
 }
 
-// Public — anyone can fetch published videos (with signed URLs)
+// Public — anyone can fetch published videos with signed URLs
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const page = Math.max(1, Number(searchParams.get('page') ?? 1))
@@ -66,7 +73,7 @@ export async function GET(req: Request) {
   return NextResponse.json({ videos: videos.map(withSignedUrls), total, page, pages: Math.ceil(total / limit) })
 }
 
-// Admin only — upload new video record
+// Admin only — save uploaded video record
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
